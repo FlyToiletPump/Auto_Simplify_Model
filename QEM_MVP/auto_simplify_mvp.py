@@ -1,9 +1,10 @@
 # auto_simplify_mvp.py
-import os
+import argparse
 import json
+import os
+
 import numpy as np
 import open3d as o3d
-import argparse
 
 
 def load_mesh(path):

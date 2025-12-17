@@ -1,8 +1,8 @@
-import open3d as o3d
 import numpy as np
+import open3d as o3d
 
-orig = o3d.io.read_triangle_mesh("bunny_10k.obj")
-simp = o3d.io.read_triangle_mesh("simplified_bunny.ply")
+orig = o3d.io.read_triangle_mesh("../bunny_10k.obj")
+simp = o3d.io.read_triangle_mesh("../simplified_bunny.ply")
 
 print(f"Original: {len(orig.triangles)} faces")
 print(f"Simplified: {len(simp.triangles)} faces")

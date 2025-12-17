@@ -1,0 +1,21 @@
+# Auto_Simplify_Model 依赖项 使用python解释器版本3.8-3.10，防止python版本冲突
+# 核心依赖
+numpy>=1.21.0,<2.0
+open3d>=0.15.0
+torch>=1.10.0
+
+# 辅助库
+tqdm>=4.64.0
+trimesh>=3.11.0
+
+# 可选依赖（用于可视化和高级功能）
+matplotlib>=3.5.0
+pyvista>=0.34.0
+# 手动安装 meshcnn>=1.0.0
+
+# 数据处理
+pandas>=1.3.0,<2.3.0
+scikit-learn>=1.0.0
+
+# 用于3D模型IO
+pyyaml>=6.0
