@@ -113,11 +113,10 @@ class EdgeCollapser:
         # 对每条边的两个顶点进行排序，确保一致性
         edges = np.sort(edges, axis=1)
         
-        # 使用 numpy 的 unique 函数去除重复边
-        edges = np.unique(edges, axis=0)
+        # 使用 numpy 的 unique 函数去除重复边，直接返回numpy数组
+        unique_edges = np.unique(edges, axis=0)
         
-        # 将 numpy 数组转换为元组集合返回
-        return set(map(tuple, edges))
+        return unique_edges
     
     def collapse_edge(self, mesh, v1, v2, target_pos, return_affected=False):
         """执行边折叠操作，将v1折叠到target_pos"""
@@ -190,16 +189,15 @@ class EdgeCollapser:
     def find_best_collapse(self, mesh, quadrics, feature_aware_qem=None):
         """找到最佳的边折叠候选"""
         vertices = np.asarray(mesh.vertices)
-        edges = self.build_edge_set(mesh)
+        edges = self.build_edge_set(mesh)  # 现在返回numpy数组
         
         best_cost = float('inf')
         best_edge = None
         best_target_pos = None
         
-        # 预分配数组以提高计算效率
-        edge_array = np.array(list(edges))
-        v1_indices = edge_array[:, 0]
-        v2_indices = edge_array[:, 1]
+        # 直接使用edges数组，无需转换
+        v1_indices = edges[:, 0]
+        v2_indices = edges[:, 1]
         
         # 批量获取顶点位置
         v1_positions = vertices[v1_indices]
@@ -230,33 +228,31 @@ class EdgeCollapser:
         min_errors = np.minimum(np.minimum(errors_v1, errors_v2), errors_mid)
         target_indices = np.argmin(np.stack([errors_v1, errors_v2, errors_mid]), axis=0)
         
-        # 收集所有可能的最佳边信息
-        edge_costs = list(zip(edge_array, min_errors, target_indices))
-        
         # 如果使用特征感知QEM，应用特征权重
         if feature_aware_qem:
-            # 这里可能需要调整，因为特征感知QEM可能需要逐个处理边
-            for i, (edge, cost, target_idx) in enumerate(edge_costs):
-                v1, v2 = edge
-                # 将numpy数组形式的边转换为元组，使其可哈希
+            # 逐个处理边，应用特征权重
+            for i in range(len(edges)):
+                v1, v2 = edges[i]
                 edge_tuple = (v1, v2)
-                adjusted_cost = feature_aware_qem.compute_feature_edge_cost(edge_tuple, cost, vertices)
-                edge_costs[i] = (edge, adjusted_cost, target_idx)
+                current_cost = min_errors[i]
+                # 应用特征权重
+                adjusted_cost = feature_aware_qem.compute_feature_edge_cost(edge_tuple, current_cost, vertices)
+                min_errors[i] = adjusted_cost
         
         # 找到全局最佳边
-        for edge, cost, target_idx in edge_costs:
-            if cost < best_cost:
-                best_cost = cost
-                best_edge = tuple(edge)
-                
-                # 根据目标索引确定目标位置
-                v1, v2 = edge
-                if target_idx == 0:
-                    best_target_pos = vertices[v1]
-                elif target_idx == 1:
-                    best_target_pos = vertices[v2]
-                else:
-                    best_target_pos = (vertices[v1] + vertices[v2]) / 2
+        best_idx = np.argmin(min_errors)
+        best_edge = tuple(edges[best_idx])
+        best_cost = min_errors[best_idx]
+        target_idx = target_indices[best_idx]
+        
+        # 根据目标索引确定目标位置
+        v1, v2 = best_edge
+        if target_idx == 0:
+            best_target_pos = vertices[v1]
+        elif target_idx == 1:
+            best_target_pos = vertices[v2]
+        else:
+            best_target_pos = (vertices[v1] + vertices[v2]) / 2
         
         return best_edge, best_target_pos, best_cost
     

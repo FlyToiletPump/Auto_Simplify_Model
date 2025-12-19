@@ -73,6 +73,9 @@ class ProgressiveLOD:
         collapser = EdgeCollapser()
         simplified_mesh = o3d.geometry.TriangleMesh(mesh)
         
+        # 初始化 QEMCalculator
+        qem_calc = QEMCalculator(simplified_mesh)
+        
         iteration = 0
         while len(simplified_mesh.triangles) > target_faces and iteration < max_iterations:
             # 找到最佳折叠边
@@ -91,13 +94,40 @@ class ProgressiveLOD:
                 'faces_before': len(simplified_mesh.triangles)
             })
             
-            # 执行边折叠
+            # 执行边折叠，获取受影响的顶点
             v1, v2 = best_edge
-            simplified_mesh = collapser.collapse_edge(simplified_mesh, v1, v2, best_target)
+            simplified_mesh, affected_vertices = collapser.collapse_edge(
+                simplified_mesh, v1, v2, best_target, return_affected=True
+            )
             
-            # 更新二次误差矩阵
-            qem_calc = QEMCalculator()
-            quadrics = qem_calc.compute_all_quadrics(simplified_mesh)
+            # 仅更新受影响顶点的二次误差矩阵
+            if affected_vertices:
+                # 转换为 numpy 数组以便高效计算
+                vertices = np.asarray(simplified_mesh.vertices)
+                triangles = np.asarray(simplified_mesh.triangles)
+                
+                # 初始化新的 quadrics 数组
+                new_quadrics = {i: quadrics.get(i, np.zeros((4, 4))) for i in range(len(vertices))}
+                
+                # 对每个受影响的顶点，重新计算其二次误差矩阵
+                for vertex_idx in affected_vertices:
+                    # 查找与该顶点相邻的所有三角形
+                    adjacent_triangles = []
+                    for i, triangle in enumerate(triangles):
+                        if vertex_idx in triangle:
+                            adjacent_triangles.append(triangle)
+                    
+                    # 重新计算该顶点的二次误差矩阵
+                    vertex_quadric = np.zeros((4, 4))
+                    for triangle in adjacent_triangles:
+                        K = qem_calc.compute_vertex_quadric(vertex_idx, triangle, vertices)
+                        vertex_quadric += K
+                    
+                    # 更新二次误差矩阵
+                    new_quadrics[vertex_idx] = vertex_quadric
+                
+                # 使用新的 quadrics 替代旧的
+                quadrics = new_quadrics
             
             iteration += 1
         

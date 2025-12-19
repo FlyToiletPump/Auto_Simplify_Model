@@ -50,17 +50,47 @@ class QEMCalculator:
         vertices = np.asarray(current_mesh.vertices)
         triangles = np.asarray(current_mesh.triangles)
         
-        # 初始化所有顶点的二次误差矩阵为零矩阵
+        # 初始化所有顶点的二次误差矩阵为零矩阵（使用numpy数组提高效率）
         num_vertices = len(vertices)
-        self.quadrics = {i: np.zeros((4, 4)) for i in range(num_vertices)}
+        self.quadrics = np.zeros((num_vertices, 4, 4))
         
         # 对每个三角形，更新三个顶点的二次误差矩阵
         for triangle in triangles:
+            # 计算三角形的平面方程和二次误差矩阵
+            v0 = vertices[triangle[0]]
+            v1 = vertices[triangle[1]]
+            v2 = vertices[triangle[2]]
+            
+            # 计算三角形法线
+            edge1 = v1 - v0
+            edge2 = v2 - v0
+            normal = np.cross(edge1, edge2)
+            
+            # 计算法线长度
+            normal_length = np.linalg.norm(normal)
+            if normal_length < 1e-8:
+                continue
+            
+            # 单位法线
+            normal = normal / normal_length
+            
+            # 计算平面方程 ax + by + cz + d = 0
+            a, b, c = normal
+            d = -np.dot(normal, v0)
+            
+            # 构建平面向量 [a, b, c, d]
+            p = np.array([a, b, c, d])
+            
+            # 计算二次误差矩阵 K = p^T * p
+            K = np.outer(p, p)
+            
+            # 更新三角形三个顶点的二次误差矩阵
             for vertex_idx in triangle:
-                K = self.compute_vertex_quadric(vertex_idx, triangle, vertices)
                 self.quadrics[vertex_idx] += K
         
-        return self.quadrics
+        # 将numpy数组转换为字典以便兼容现有代码
+        quadrics_dict = {i: self.quadrics[i] for i in range(num_vertices)}
+        return quadrics_dict
     
     def compute_vertex_quadrics(self, mesh=None):
         """计算所有顶点的二次误差矩阵（与compute_all_quadrics功能相同，为兼容接口）"""
