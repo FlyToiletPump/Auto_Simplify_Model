@@ -62,8 +62,17 @@ def evaluate_model(model_path, test_data_path):
     print(f"平均绝对误差 (MAE): {mae:.6f}")
     
     # 相关系数
-    correlation = np.corrcoef(predictions.flatten(), importance.flatten())[0, 1]
-    print(f"相关系数: {correlation:.6f}")
+    try:
+        correlation = np.corrcoef(predictions.flatten(), importance.flatten())[0, 1]
+        # 检查是否为nan
+        if np.isnan(correlation):
+            print("警告: 相关系数计算结果为NaN，可能是因为数据方差为0")
+            correlation = 0.0
+        print(f"相关系数: {correlation:.6f}")
+    except Exception as e:
+        print(f"计算相关系数时出错: {e}")
+        correlation = 0.0
+        print(f"相关系数: {correlation:.6f}")
     
     # 计算准确率（预测值与真实值的差异在0.1以内）
     accuracy = np.mean(np.abs(predictions - importance) < 0.1)

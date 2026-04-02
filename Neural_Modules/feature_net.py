@@ -5,7 +5,7 @@ import torch.nn as nn
 class MeshFeatureNet(nn.Module):
     """轻量级网格特征提取网络"""
     
-    def __init__(self, input_dim=6, hidden_dim=32, output_dim=1):
+    def __init__(self, input_dim=6, hidden_dim=64, output_dim=1):
         """
         参数:
             input_dim: 输入特征维度（默认6：3D坐标 + 3D法线）
@@ -19,16 +19,23 @@ class MeshFeatureNet(nn.Module):
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
             nn.BatchNorm1d(hidden_dim),
+            nn.Dropout(0.2),
             
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.BatchNorm1d(hidden_dim),
+            nn.Dropout(0.2),
             
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
             nn.BatchNorm1d(hidden_dim // 2),
+            nn.Dropout(0.1),
             
-            nn.Linear(hidden_dim // 2, output_dim),
+            nn.Linear(hidden_dim // 2, hidden_dim // 4),
+            nn.ReLU(),
+            nn.BatchNorm1d(hidden_dim // 4),
+            
+            nn.Linear(hidden_dim // 4, output_dim),
             nn.Sigmoid()  # 输出特征重要性分数 [0, 1]
         )
     

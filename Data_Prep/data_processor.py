@@ -171,15 +171,25 @@ class DataProcessor:
         print(f"处理完成: {success_count}/{len(mesh_files)} 成功")
         return success_count
     
-    def generate_synthetic_data(self, num_samples=10000, output_file="synthetic_data.h5"):
+    def generate_synthetic_data(self, num_samples=20000, output_file="synthetic_data.h5"):
         """生成合成训练数据"""
         # 生成随机顶点特征
         features = np.random.rand(num_samples, 6)  # 3D坐标 + 3D法线
         
         # 生成合成重要性标签
-        # 基于特征模式生成标签
-        # 例如：法线的z分量越大，重要性越高
-        importance = features[:, 5]  # 法线的z分量
+        # 基于多个特征模式生成标签，增加数据多样性
+        # 1. 法线的z分量
+        importance_z = features[:, 5]
+        # 2. 坐标的x分量
+        importance_x = features[:, 0]
+        # 3. 坐标的y分量
+        importance_y = features[:, 1]
+        # 4. 法线的长度（虽然法线通常是单位向量，但这里模拟一些变化）
+        normal_length = np.linalg.norm(features[:, 3:6], axis=1)
+        importance_normal = (normal_length - normal_length.min()) / (normal_length.max() - normal_length.min() + 1e-8)
+        
+        # 综合多个特征计算重要性
+        importance = 0.3 * importance_z + 0.2 * importance_x + 0.2 * importance_y + 0.3 * importance_normal
         importance = (importance - importance.min()) / (importance.max() - importance.min() + 1e-8)
         
         # 添加一些噪声

@@ -51,7 +51,7 @@ def main(visualize=True, custom_mesh_path=None, use_open3d=False, use_deep_learn
         mesh = load_mesh(custom_mesh_path)
     else:
         # 使用示例模型（如果存在）
-        sample_mesh_path = "17Pro Max .obj"
+        sample_mesh_path = "bunny_10k.obj"
         
         if os.path.exists(sample_mesh_path):
             print(f"加载示例模型: {sample_mesh_path}")

@@ -2,7 +2,7 @@ import numpy as np
 import open3d as o3d
 import torch
 import os
-from feature_net import create_feature_net
+from .feature_net import create_feature_net
 
 class FeatureIntegrator:
     """将深度学习特征与网格简化算法集成"""

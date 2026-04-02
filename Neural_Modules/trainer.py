@@ -25,6 +25,12 @@ class FeatureNetTrainer:
             weight_decay=weight_decay
         )
         
+        # 添加学习率调度器
+        self.scheduler = optim.lr_scheduler.ExponentialLR(
+            self.optimizer,
+            gamma=0.95  # 每轮学习率乘以0.95
+        )
+        
         self.loss_fn = F.mse_loss  # 均方误差损失
     
     def prepare_data(self, features, labels):
@@ -107,6 +113,11 @@ class FeatureNetTrainer:
                 print(f"Epoch {epoch+1}/{epochs}: Train Loss: {avg_train_loss:.6f}, Val Loss: {val_loss:.6f}")
             else:
                 print(f"Epoch {epoch+1}/{epochs}: Train Loss: {avg_train_loss:.6f}")
+            
+            # 更新学习率
+            self.scheduler.step()
+            current_lr = self.optimizer.param_groups[0]['lr']
+            print(f"  Learning rate: {current_lr:.6f}")
         
         return train_history, val_history
     
