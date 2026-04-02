@@ -1,24 +1,56 @@
 import numpy as np
 import open3d as o3d
 import torch
+import os
+from feature_net import create_feature_net
 
 class FeatureIntegrator:
     """将深度学习特征与网格简化算法集成"""
     
-    def __init__(self, feature_net=None):
+    def __init__(self, feature_net=None, model_path=None):
         """
         参数:
             feature_net: 预训练的特征提取网络
+            model_path: 预训练模型路径
         """
         self.feature_net = feature_net
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
+        # 如果提供了模型路径，加载模型
+        if model_path:
+            self.load_model(model_path)
+        elif feature_net:
+            self.feature_net.to(self.device)
+            self.feature_net.eval()
+    
     def set_feature_net(self, feature_net):
         """设置特征提取网络"""
         self.feature_net = feature_net
         if feature_net:
             self.feature_net.to(self.device)
             self.feature_net.eval()
+    
+    def load_model(self, model_path):
+        """加载预训练模型"""
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"模型文件不存在: {model_path}")
+        
+        # 检测模型类型
+        model_type = "vertex"
+        if "edge" in model_path:
+            model_type = "edge"
+        elif "local" in model_path:
+            model_type = "local"
+        
+        # 创建模型
+        self.feature_net = create_feature_net(model_type)
+        
+        # 加载权重
+        checkpoint = torch.load(model_path, map_location=self.device)
+        self.feature_net.load_state_dict(checkpoint['model_state_dict'])
+        self.feature_net.to(self.device)
+        self.feature_net.eval()
+        print(f"模型加载成功: {model_path}")
     
     def extract_vertex_features(self, mesh):
         """从网格中提取顶点特征"""

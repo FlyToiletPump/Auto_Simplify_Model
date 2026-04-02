@@ -27,12 +27,18 @@ from Core_Algorithms.progressive_lod import ProgressiveLOD
 # 导入评估模块
 from Evaluation.metrics import MeshQualityEvaluator
 
-def main(visualize=True, custom_mesh_path=None):
+# 导入深度学习模块
+from Neural_Modules.feature_integrator import FeatureIntegrator
+
+def main(visualize=True, custom_mesh_path=None, use_open3d=False, use_deep_learning=False, model_path=None):
     """主函数
     
     Args:
         visualize: 是否可视化结果
         custom_mesh_path: 自定义模型路径
+        use_open3d: 是否使用Open3D内置简化方法
+        use_deep_learning: 是否使用深度学习特征
+        model_path: 预训练模型路径
     """
     print("=== 网格简化系统示例 ===")
     
@@ -45,7 +51,7 @@ def main(visualize=True, custom_mesh_path=None):
         mesh = load_mesh(custom_mesh_path)
     else:
         # 使用示例模型（如果存在）
-        sample_mesh_path = "Auto_Simplify_Model/bunny_10k.obj"
+        sample_mesh_path = "17Pro Max .obj"
         
         if os.path.exists(sample_mesh_path):
             print(f"加载示例模型: {sample_mesh_path}")
@@ -79,7 +85,8 @@ def main(visualize=True, custom_mesh_path=None):
     simplified_basic = edge_collapser.simplify(
         mesh=preprocessed_mesh,
         target_faces=target_faces_basic,
-        quadrics=qem_calculator.vertex_quadrics
+        quadrics=qem_calculator.vertex_quadrics,
+        use_open3d=use_open3d
     )
     
     print(f"基本QEM简化完成: {len(simplified_basic.triangles)} 三角形")
@@ -88,7 +95,18 @@ def main(visualize=True, custom_mesh_path=None):
     print("\n4. 执行特征感知QEM简化")
     target_faces_feature = target_faces_basic
     
-    feature_qem = FeatureAwareQEM(preprocessed_mesh)
+    # 创建特征集成器（如果使用深度学习）
+    feature_integrator = None
+    if use_deep_learning:
+        try:
+            print("加载深度学习特征集成器...")
+            feature_integrator = FeatureIntegrator(model_path=model_path)
+            print("特征集成器加载成功")
+        except Exception as e:
+            print(f"加载特征集成器失败: {e}")
+            print("将使用传统特征感知QEM")
+    
+    feature_qem = FeatureAwareQEM(preprocessed_mesh, feature_integrator=feature_integrator)
     feature_qem.compute_vertex_quadrics()
     feature_qem.compute_feature_weights(crease_edges)
     
@@ -96,7 +114,8 @@ def main(visualize=True, custom_mesh_path=None):
         mesh=preprocessed_mesh,
         target_faces=target_faces_feature,
         quadrics=feature_qem.vertex_quadrics,
-        feature_weights=feature_qem.feature_weights
+        feature_weights=feature_qem.feature_weights,
+        use_open3d=use_open3d
     )
     
     print(f"特征感知QEM简化完成: {len(simplified_feature.triangles)} 三角形")
@@ -108,7 +127,8 @@ def main(visualize=True, custom_mesh_path=None):
         mesh=preprocessed_mesh,
         target_faces_list=[5000, 2000, 1000, 500],
         feature_aware=True,
-        crease_edges=crease_edges
+        crease_edges=crease_edges,
+        use_open3d=use_open3d
     )
     
     print(f"生成了 {len(lod_levels)} 个LOD级别")
@@ -191,14 +211,20 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="网格简化系统示例")
     parser.add_argument("--no-visualize", action="store_true", help="不显示可视化界面")
     parser.add_argument("--mesh-path", type=str, default=None, help="输入网格文件路径")
+    parser.add_argument("--use-open3d", action="store_true", help="使用Open3D内置简化方法")
+    parser.add_argument("--use-deep-learning", action="store_true", help="使用深度学习特征")
+    parser.add_argument("--model-path", type=str, default="../Models/vertex_feature_net.pth", help="预训练模型路径")
     
     args = parser.parse_args()
     
     # 创建输出目录
     os.makedirs("../output", exist_ok=True)
     
-    # 运行主函数
+    # 调用主函数
     main(
         visualize=not args.no_visualize,
-        custom_mesh_path=args.mesh_path
+        custom_mesh_path=args.mesh_path,
+        use_open3d=args.use_open3d,
+        use_deep_learning=args.use_deep_learning,
+        model_path=args.model_path
     )

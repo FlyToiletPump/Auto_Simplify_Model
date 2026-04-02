@@ -8,14 +8,28 @@ class EdgeCollapser:
     def __init__(self):
         self.vertex_map = {}
     
-    def simplify(self, mesh, target_faces, quadrics, feature_weights=None, max_iterations=10000, verbose=True):
-        """执行边折叠简化"""
-        # 使用深拷贝创建网格副本
-        simplified_mesh = o3d.geometry.TriangleMesh(mesh)
+    def simplify(self, mesh, target_faces, quadrics, feature_weights=None, max_iterations=10000, verbose=True, use_open3d=False):
+        """执行边折叠简化
         
+        参数:
+            mesh: 输入网格
+            target_faces: 目标面数
+            quadrics: 二次误差矩阵
+            feature_weights: 特征权重（用于特征感知简化）
+            max_iterations: 最大迭代次数
+            verbose: 是否显示进度
+            use_open3d: 是否使用Open3D内置简化方法
+        """
         # 如果已经低于目标面数，直接返回
-        if len(simplified_mesh.triangles) <= target_faces:
-            return simplified_mesh
+        if len(mesh.triangles) <= target_faces:
+            return o3d.geometry.TriangleMesh(mesh)
+        
+        # 使用Open3D内置方法
+        if use_open3d:
+            return self.simplify_open3d(mesh, target_faces, feature_weights, verbose)
+        
+        # 原始实现（保持不变）
+        simplified_mesh = o3d.geometry.TriangleMesh(mesh)
         
         from .base_qem import QEMCalculator
         qem_calc = QEMCalculator(simplified_mesh)
@@ -87,6 +101,32 @@ class EdgeCollapser:
             pbar.close()
         
         simplified_mesh.compute_vertex_normals()
+        return simplified_mesh
+    
+    def simplify_open3d(self, mesh, target_faces, feature_weights=None, verbose=True):
+        """使用Open3D内置方法进行网格简化
+        
+        参数:
+            mesh: 输入网格
+            target_faces: 目标面数
+            feature_weights: 特征权重（用于特征感知简化）
+            verbose: 是否显示进度
+        """
+        if verbose:
+            print(f"使用Open3D内置方法简化网格，目标面数: {target_faces}")
+        
+        # 复制原始网格
+        simplified_mesh = o3d.geometry.TriangleMesh(mesh)
+        
+        # 使用Open3D的二次误差简化
+        simplified_mesh = simplified_mesh.simplify_quadric_decimation(target_number_of_triangles=target_faces)
+        
+        # 计算顶点法线
+        simplified_mesh.compute_vertex_normals()
+        
+        if verbose:
+            print(f"Open3D简化完成: {len(simplified_mesh.triangles)} 三角形")
+        
         return simplified_mesh
     
     def get_edge_neighbors(self, v, edges):

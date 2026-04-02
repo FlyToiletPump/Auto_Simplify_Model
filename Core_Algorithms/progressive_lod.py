@@ -12,8 +12,18 @@ class ProgressiveLOD:
         self.lod_levels = []  # 存储不同LOD级别的模型
         self.collapse_history = []  # 记录边折叠历史
     
-    def generate_lods(self, mesh, target_faces_list, feature_aware=False, crease_edges=None, max_iterations_per_lod=10000, dihedral_angle_threshold=45.0):
-        """生成多个LOD级别的模型"""
+    def generate_lods(self, mesh, target_faces_list, feature_aware=False, crease_edges=None, max_iterations_per_lod=10000, dihedral_angle_threshold=45.0, use_open3d=False):
+        """生成多个LOD级别的模型
+        
+        参数:
+            mesh: 输入网格
+            target_faces_list: 目标面数列表
+            feature_aware: 是否使用特征感知简化
+            crease_edges: 折痕边列表
+            max_iterations_per_lod: 每个LOD级别的最大迭代次数
+            dihedral_angle_threshold: 二面角阈值
+            use_open3d: 是否使用Open3D内置简化方法
+        """
         # 确保target_faces_list是有序的（从高到低）
         target_lods = target_faces_list.copy()
         target_lods.sort(reverse=True)
@@ -44,13 +54,15 @@ class ProgressiveLOD:
             
             print(f"Generating LOD with {target_faces} faces...")
             
-            # 计算二次误差矩阵
-            qem_calc = QEMCalculator()
-            quadrics = qem_calc.compute_all_quadrics(current_mesh)
+            # 计算二次误差矩阵（仅当不使用Open3D时需要）
+            quadrics = None
+            if not use_open3d:
+                qem_calc = QEMCalculator()
+                quadrics = qem_calc.compute_all_quadrics(current_mesh)
             
             # 执行简化
             simplified_mesh = self._simplify_to_target(
-                current_mesh, target_faces, quadrics, feature_qem, max_iterations_per_lod
+                current_mesh, target_faces, quadrics, feature_qem, max_iterations_per_lod, use_open3d
             )
             
             # 保存当前LOD级别
@@ -68,9 +80,24 @@ class ProgressiveLOD:
         # 返回仅包含网格的列表以兼容调用者
         return [lod['mesh'] for lod in self.lod_levels]
     
-    def _simplify_to_target(self, mesh, target_faces, quadrics, feature_aware_qem=None, max_iterations=10000):
-        """简化网格到目标面数"""
+    def _simplify_to_target(self, mesh, target_faces, quadrics, feature_aware_qem=None, max_iterations=10000, use_open3d=False):
+        """简化网格到目标面数
+        
+        参数:
+            mesh: 输入网格
+            target_faces: 目标面数
+            quadrics: 二次误差矩阵
+            feature_aware_qem: 特征感知QEM计算器
+            max_iterations: 最大迭代次数
+            use_open3d: 是否使用Open3D内置简化方法
+        """
         collapser = EdgeCollapser()
+        
+        # 使用Open3D内置方法
+        if use_open3d:
+            return collapser.simplify_open3d(mesh, target_faces, feature_aware_qem)
+        
+        # 原始实现（保持不变）
         simplified_mesh = o3d.geometry.TriangleMesh(mesh)
         
         # 初始化 QEMCalculator

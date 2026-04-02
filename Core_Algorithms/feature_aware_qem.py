@@ -7,14 +7,16 @@ from Data_Prep.crease_detector import detect_creases
 class FeatureAwareQEM:
     """特征感知的二次误差度量算法"""
     
-    def __init__(self, mesh=None, feature_weight=10.0):
+    def __init__(self, mesh=None, feature_weight=10.0, feature_integrator=None):
         self.mesh = mesh
         self.qem_calculator = QEMCalculator(mesh)
         self.feature_weight = feature_weight
+        self.feature_integrator = feature_integrator
         self.crease_edges = set()
         self.feature_vertices = set()
         self.feature_weights = None
         self.vertex_quadrics = {}
+        self.vertex_importance = None
     
     def compute_vertex_quadrics(self, mesh=None):
         """计算所有顶点的二次误差矩阵"""
@@ -41,6 +43,15 @@ class FeatureAwareQEM:
         for v_idx in self.feature_vertices:
             if v_idx < num_vertices:
                 self.feature_weights[v_idx] = self.feature_weight
+        
+        # 如果有特征集成器，使用深度学习预测的重要性
+        if self.feature_integrator:
+            self.vertex_importance = self.feature_integrator.predict_vertex_importance(current_mesh)
+            # 集成深度学习特征到权重中
+            for i in range(num_vertices):
+                if i < len(self.vertex_importance):
+                    # 重要性越高，权重越大
+                    self.feature_weights[i] = 1.0 + (self.feature_weight - 1.0) * self.vertex_importance[i]
         
         return self.feature_weights
     
@@ -76,6 +87,14 @@ class FeatureAwareQEM:
             # 为连接特征顶点的边增加一定惩罚
             return base_cost * (self.feature_weight / 2)
         
+        # 如果有深度学习特征，考虑顶点重要性
+        if self.vertex_importance is not None:
+            if v1 < len(self.vertex_importance) and v2 < len(self.vertex_importance):
+                # 计算平均重要性
+                avg_importance = (self.vertex_importance[v1] + self.vertex_importance[v2]) / 2
+                # 重要性越高，成本越高（越不容易被折叠）
+                return base_cost * (1.0 + (self.feature_weight - 1.0) * avg_importance)
+        
         # 正常边使用基础成本
         return base_cost
     
@@ -91,10 +110,13 @@ class FeatureAwareQEM:
         # 1. 计算所有顶点的二次误差矩阵
         quadrics = self.qem_calculator.compute_all_quadrics(mesh)
         
-        # 2. 构建初始边集合和成本
+        # 2. 计算特征权重
+        self.compute_feature_weights(mesh=mesh)
+        
+        # 3. 构建初始边集合和成本
         edge_costs = compute_edge_costs(mesh, quadrics)
         
-        # 3. 执行边折叠简化
+        # 4. 执行边折叠简化
         iteration = 0
         simplified_mesh = mesh
         
