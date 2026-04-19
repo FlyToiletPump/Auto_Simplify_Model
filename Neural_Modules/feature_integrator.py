@@ -46,8 +46,19 @@ class FeatureIntegrator:
         self.feature_net = create_feature_net(model_type)
         
         # 加载权重
-        checkpoint = torch.load(model_path, map_location=self.device)
-        self.feature_net.load_state_dict(checkpoint['model_state_dict'])
+        try:
+            # 尝试加载完整的模型状态字典
+            checkpoint = torch.load(model_path, map_location=self.device)
+            if 'model_state_dict' in checkpoint:
+                self.feature_net.load_state_dict(checkpoint['model_state_dict'])
+            else:
+                # 直接加载状态字典（适用于real_model_feature_net.pth）
+                self.feature_net.load_state_dict(checkpoint)
+        except Exception as e:
+            print(f"加载模型时出错: {e}")
+            # 尝试直接加载
+            self.feature_net.load_state_dict(torch.load(model_path, map_location=self.device))
+        
         self.feature_net.to(self.device)
         self.feature_net.eval()
         print(f"模型加载成功: {model_path}")
@@ -100,8 +111,13 @@ class FeatureIntegrator:
         
         return edge_features, edge_list
     
-    def predict_vertex_importance(self, mesh):
-        """预测顶点的特征重要性"""
+    def predict_vertex_importance(self, mesh, batch_size=1024):
+        """预测顶点的特征重要性
+        
+        参数:
+            mesh: 输入网格
+            batch_size: 批处理大小
+        """
         if not self.feature_net:
             raise ValueError("Feature network not set")
         
@@ -111,12 +127,18 @@ class FeatureIntegrator:
         # 转换为PyTorch张量
         features_tensor = torch.tensor(features, dtype=torch.float32).to(self.device)
         
-        # 预测重要性
-        with torch.no_grad():
-            importance_scores = self.feature_net(features_tensor)
+        # 批处理预测
+        importance_scores = []
+        num_vertices = features_tensor.shape[0]
         
-        # 转换为numpy数组
-        importance_scores = importance_scores.cpu().numpy().flatten()
+        for i in range(0, num_vertices, batch_size):
+            batch_features = features_tensor[i:i+batch_size]
+            with torch.no_grad():
+                batch_scores = self.feature_net(batch_features)
+            importance_scores.append(batch_scores.cpu())
+        
+        # 合并结果
+        importance_scores = torch.cat(importance_scores).numpy().flatten()
         
         # 归一化到[0, 1]范围
         if importance_scores.max() > importance_scores.min():
@@ -155,8 +177,15 @@ class FeatureIntegrator:
         
         return edge_importance_map, edge_list
     
-    def integrate_features_with_qem(self, mesh, qem_calculator, alpha=0.5):
-        """将深度学习特征与QEM算法集成"""
+    def integrate_features_with_qem(self, mesh, qem_calculator, alpha=0.5, max_edges=10000):
+        """将深度学习特征与QEM算法集成
+        
+        参数:
+            mesh: 输入网格
+            qem_calculator: QEM计算器
+            alpha: 特征权重因子
+            max_edges: 最大处理边数
+        """
         # 预测顶点重要性
         vertex_importance = self.predict_vertex_importance(mesh)
         
@@ -170,6 +199,14 @@ class FeatureIntegrator:
             edges.add(tuple(sorted((tri[0], tri[1]))))
             edges.add(tuple(sorted((tri[1], tri[2]))))
             edges.add(tuple(sorted((tri[2], tri[0]))))
+        
+        # 限制处理的边数，加速计算
+        edges = list(edges)
+        if len(edges) > max_edges:
+            # 随机采样一部分边进行处理
+            import random
+            random.shuffle(edges)
+            edges = edges[:max_edges]
         
         # 计算集成成本
         integrated_edge_costs = []

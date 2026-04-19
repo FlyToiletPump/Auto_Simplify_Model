@@ -113,12 +113,25 @@ class MainWindow:
             # 执行减面
             lod_generator = ProgressiveLOD()
             
+            # 准备特征提取器（如果使用深度学习）
+            feature_extractor = None
+            if self.use_deep_learning.get():
+                from Neural_Modules.feature_integrator import FeatureIntegrator
+                model_path = self.model_path.get()
+                try:
+                    feature_extractor = FeatureIntegrator(model_path=model_path)
+                    print(f"加载深度学习模型成功: {model_path}")
+                except Exception as e:
+                    messagebox.showerror("错误", f"加载深度学习模型失败: {str(e)}")
+                    return
+            
             # 执行简化
             simplified_mesh = lod_generator.generate_lods(
                 cleaned_mesh,
                 target_faces_list=[target_faces],
                 feature_aware=self.use_deep_learning.get(),
-                use_open3d=self.use_open3d.get()
+                use_open3d=self.use_open3d.get(),
+                feature_extractor=feature_extractor
             )[0]
             
             # 显示结果
