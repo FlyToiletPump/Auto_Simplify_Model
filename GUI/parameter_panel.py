@@ -8,13 +8,14 @@ import tkinter as tk
 from tkinter import filedialog
 
 class ParameterPanel(tk.Frame):
-    def __init__(self, parent, target_faces, use_open3d, use_deep_learning, model_path):
+    def __init__(self, parent, target_faces, use_open3d, use_deep_learning, model_path, lod_levels):
         super().__init__(parent, relief=tk.RAISED, borderwidth=1)
         
         self.target_faces = target_faces
         self.use_open3d = use_open3d
         self.use_deep_learning = use_deep_learning
         self.model_path = model_path
+        self.lod_levels = lod_levels
         
         self.create_widgets()
     
@@ -25,6 +26,14 @@ class ParameterPanel(tk.Frame):
         
         tk.Label(face_frame, text="目标面数:").pack(side=tk.LEFT, padx=5)
         tk.Entry(face_frame, textvariable=self.target_faces, width=10).pack(side=tk.LEFT, padx=5)
+        
+        # 多级LOD设置
+        lod_frame = tk.Frame(self, padx=10, pady=5)
+        lod_frame.pack(fill=tk.X)
+        
+        tk.Label(lod_frame, text="多级LOD (逗号分隔):").pack(side=tk.LEFT, padx=5)
+        tk.Entry(lod_frame, textvariable=self.lod_levels, width=30).pack(side=tk.LEFT, padx=5)
+        tk.Label(lod_frame, text="例如: 1000,2000,5000", fg="gray").pack(side=tk.LEFT, padx=5)
         
         # 选项设置
         option_frame = tk.Frame(self, padx=10, pady=5)

@@ -101,6 +101,26 @@ class ProgressiveLOD:
             use_open3d: 是否使用Open3D内置简化方法
             feature_integrator: 特征集成器实例（可选）
         """
+        # 评估模型复杂度
+        initial_faces = len(mesh.triangles)
+        is_small_model = initial_faces < 1000
+        reduction_ratio = target_faces / initial_faces if initial_faces > 0 else 0
+        
+        # 对于小面数模型，使用特殊处理策略
+        if is_small_model:
+            print(f"检测到小面数模型（{initial_faces}面），使用特殊处理策略")
+            # 对于小面数模型，确保减面比例不过大
+            if reduction_ratio < 0.3:
+                print("减面比例过大，调整为30%")
+                target_faces = max(int(initial_faces * 0.3), 10)  # 确保至少保留10个面
+        
+        # 网格预处理：修复拓扑错误
+        mesh = self._preprocess_mesh(mesh)
+        
+        # 检查模型是否封闭
+        is_closed = self._is_mesh_closed(mesh)
+        print(f"模型状态: {'封闭' if is_closed else '非封闭'}")
+        
         collapser = EdgeCollapser()
         
         # 使用Open3D内置方法（如果不使用深度学习特征）
@@ -109,33 +129,57 @@ class ProgressiveLOD:
         
         # 混合方法：先使用Open3D快速简化，再使用特征感知方法微调
         if use_open3d and feature_integrator:
-            # 先使用Open3D快速简化到目标面数的120%
-            intermediate_faces = int(target_faces * 1.2)
+            # 先使用Open3D快速简化到目标面数的110%（减少中间面数，降低破碎风险）
+            intermediate_faces = int(target_faces * 1.1)
             if intermediate_faces < len(mesh.triangles):
-                # 使用Open3D快速简化
-                open3d_simplified = mesh.simplify_quadric_decimation(target_number_of_triangles=intermediate_faces)
+                # 使用Open3D快速简化，设置更保守的参数
+                open3d_simplified = mesh.simplify_quadric_decimation(
+                    target_number_of_triangles=intermediate_faces,
+                    maximum_error=0.01  # 增加误差限制，减少几何变形
+                )
                 print(f"Open3D快速简化完成，面数: {len(open3d_simplified.triangles)} (目标: {intermediate_faces})")
                 
                 # 预测顶点重要性
                 vertex_importance = feature_integrator.predict_vertex_importance(open3d_simplified)
                 print(f"Calculated vertex importance for {len(open3d_simplified.vertices)} vertices")
+                print(f"Vertex importance statistics: min={vertex_importance.min():.4f}, max={vertex_importance.max():.4f}, mean={vertex_importance.mean():.4f}, std={vertex_importance.std():.4f}")
+                
+                # 检测边界边，增加边界保护
+                boundary_edges = self._detect_boundary_edges(open3d_simplified)
+                print(f"检测到 {len(boundary_edges)} 条边界边")
                 
                 # 快速特征感知简化：使用Open3D的simplify_quadric_decimation方法，但在简化前调整顶点权重
                 # 这里我们通过调整顶点位置来间接影响简化过程
                 vertices = np.asarray(open3d_simplified.vertices)
                 normals = np.asarray(open3d_simplified.vertex_normals)
                 
-                # 对重要顶点进行微调，使其更突出，从而在简化过程中更不容易被折叠
-                importance_threshold = 0.7
+                # 对重要顶点和边界顶点进行微调，使其更突出，从而在简化过程中更不容易被折叠
+                # 动态调整阈值：根据重要性分数的分布自动设置阈值
+                importance_threshold = np.percentile(vertex_importance, 75)  # 使用75分位数作为阈值
+                print(f"使用动态重要性阈值: {importance_threshold:.4f}")
                 important_vertices = np.where(vertex_importance > importance_threshold)[0]
-                print(f"找到 {len(important_vertices)} 个重要顶点")
+                print(f"找到 {len(important_vertices)} 个重要顶点 (占比: {len(important_vertices)/len(vertex_importance)*100:.1f}%)")
                 
-                if len(important_vertices) > 0:
+                # 收集边界顶点
+                boundary_vertices = set()
+                for edge in boundary_edges:
+                    boundary_vertices.add(edge[0])
+                    boundary_vertices.add(edge[1])
+                boundary_vertices = list(boundary_vertices)
+                print(f"找到 {len(boundary_vertices)} 个边界顶点")
+                
+                # 对重要顶点和边界顶点进行微调
+                if len(important_vertices) > 0 or len(boundary_vertices) > 0:
                     # 对重要顶点进行微调，沿法线方向外推
                     for v in important_vertices:
                         importance = vertex_importance[v]
                         # 根据重要性调整顶点位置，重要性越高，外推越多
-                        displacement = normals[v] * (importance - importance_threshold) * 0.05
+                        displacement = normals[v] * (importance - importance_threshold) * 0.03  # 减少外推距离
+                        vertices[v] += displacement
+                    
+                    # 对边界顶点进行微调，沿法线方向外推，增强边界保护
+                    for v in boundary_vertices:
+                        displacement = normals[v] * 0.02  # 固定外推距离
                         vertices[v] += displacement
                     
                     # 创建新的网格
@@ -144,20 +188,33 @@ class ProgressiveLOD:
                     temp_mesh.triangles = open3d_simplified.triangles
                     temp_mesh.compute_vertex_normals()
                     
-                    # 使用Open3D的quadric decimation方法简化到目标面数
-                    simplified_mesh = temp_mesh.simplify_quadric_decimation(target_number_of_triangles=target_faces)
+                    # 使用Open3D的quadric decimation方法简化到目标面数，设置更保守的参数
+                    simplified_mesh = temp_mesh.simplify_quadric_decimation(
+                        target_number_of_triangles=target_faces,
+                        maximum_error=0.01  # 增加误差限制，减少几何变形
+                    )
                     print(f"特征感知简化完成，面数: {len(simplified_mesh.triangles)} (目标: {target_faces})")
                 else:
-                    # 如果没有重要顶点，直接使用Open3D简化到目标面数
-                    simplified_mesh = open3d_simplified.simplify_quadric_decimation(target_number_of_triangles=target_faces)
+                    # 如果没有重要顶点和边界顶点，直接使用Open3D简化到目标面数
+                    simplified_mesh = open3d_simplified.simplify_quadric_decimation(
+                        target_number_of_triangles=target_faces,
+                        maximum_error=0.01  # 增加误差限制，减少几何变形
+                    )
                     print(f"Open3D简化完成，面数: {len(simplified_mesh.triangles)} (目标: {target_faces})")
                 
+                # 后处理：修复拓扑错误和网格撕裂
+                simplified_mesh = self._postprocess_mesh(simplified_mesh)
                 simplified_mesh.compute_vertex_normals()
                 return simplified_mesh
             else:
-                # 如果初始面数已经小于或等于目标面数的120%，直接使用Open3D简化到目标面数
-                simplified_mesh = mesh.simplify_quadric_decimation(target_number_of_triangles=target_faces)
+                # 如果初始面数已经小于或等于目标面数的110%，直接使用Open3D简化到目标面数
+                simplified_mesh = mesh.simplify_quadric_decimation(
+                    target_number_of_triangles=target_faces,
+                    maximum_error=0.01  # 增加误差限制，减少几何变形
+                )
                 print(f"Open3D简化完成，面数: {len(simplified_mesh.triangles)} (目标: {target_faces})")
+                # 后处理：修复拓扑错误和网格撕裂
+                simplified_mesh = self._postprocess_mesh(simplified_mesh)
                 simplified_mesh.compute_vertex_normals()
                 return simplified_mesh
         
@@ -294,6 +351,9 @@ class ProgressiveLOD:
         simplified_mesh.compute_vertex_normals()
         print(f"简化完成: {len(simplified_mesh.triangles)} 三角形 (目标: {target_faces})")
         
+        # 后处理：修复拓扑错误和网格撕裂
+        simplified_mesh = self._postprocess_mesh(simplified_mesh)
+        
         return simplified_mesh
     
     def _feature_aware_post_processing(self, mesh, vertex_importance):
@@ -360,6 +420,187 @@ class ProgressiveLOD:
         
         return processed_mesh
     
+    def _preprocess_mesh(self, mesh):
+        """预处理网格，修复拓扑错误
+        
+        参数:
+            mesh: 输入网格
+            
+        返回:
+            预处理后的网格
+        """
+        # 移除孤立顶点
+        mesh.remove_duplicated_vertices()
+        mesh.remove_unreferenced_vertices()
+        
+        # 移除退化三角形
+        mesh.remove_degenerate_triangles()
+        
+        # 修复法线
+        mesh.compute_vertex_normals()
+        
+        print(f"网格预处理完成，顶点数: {len(mesh.vertices)}, 面数: {len(mesh.triangles)}")
+        
+        return mesh
+    
+    def _is_mesh_closed(self, mesh):
+        """检查网格是否封闭
+        
+        参数:
+            mesh: 输入网格
+            
+        返回:
+            bool: 是否封闭
+        """
+        # 计算边界边
+        boundary_edges = self._detect_boundary_edges(mesh)
+        
+        return len(boundary_edges) == 0
+    
+    def _detect_boundary_edges(self, mesh):
+        """检测网格的边界边
+        
+        参数:
+            mesh: 输入网格
+            
+        返回:
+            list: 边界边列表，每个元素是一个包含两个顶点索引的元组
+        """
+        # 计算边界边
+        triangles = np.asarray(mesh.triangles)
+        edges = {}
+        
+        # 遍历所有三角形的边
+        for tri in triangles:
+            for i in range(3):
+                v1 = tri[i]
+                v2 = tri[(i+1)%3]
+                edge = tuple(sorted((v1, v2)))
+                if edge in edges:
+                    edges[edge] += 1
+                else:
+                    edges[edge] = 1
+        
+        # 边界边是只出现一次的边
+        boundary_edges = [edge for edge, count in edges.items() if count == 1]
+        
+        return boundary_edges
+    
+    def _postprocess_mesh(self, mesh):
+        """后处理网格，修复拓扑错误和网格撕裂
+        
+        参数:
+            mesh: 输入网格
+            
+        返回:
+            后处理后的网格
+        """
+        # 移除孤立顶点和退化三角形
+        mesh.remove_duplicated_vertices()
+        mesh.remove_unreferenced_vertices()
+        mesh.remove_degenerate_triangles()
+        
+        # 尝试修复网格
+        try:
+            # 计算连通分量（兼容不同版本的Open3D）
+            if hasattr(mesh, 'cluster_connected_components'):
+                components = mesh.cluster_connected_components()
+                if isinstance(components, tuple) and len(components) > 0:
+                    components = components[0]  # 有些版本返回元组
+            else:
+                # 使用替代方法计算连通分量
+                components = self._compute_connected_components(mesh)
+            
+            num_components = max(components) + 1 if components else 1
+            
+            if num_components > 1:
+                print(f"检测到 {num_components} 个连通分量，保留最大的分量")
+                # 统计每个分量的大小
+                component_sizes = {}
+                for i in range(num_components):
+                    component_sizes[i] = sum(1 for c in components if c == i)
+                
+                # 找到最大的分量
+                largest_component = max(component_sizes, key=component_sizes.get)
+                
+                # 提取最大的分量
+                triangles = np.asarray(mesh.triangles)
+                vertices = np.asarray(mesh.vertices)
+                
+                # 找到属于最大分量的顶点
+                vertex_mask = [components[v] == largest_component for v in range(len(vertices))]
+                
+                # 重新映射顶点索引
+                vertex_map = {old_idx: new_idx for new_idx, old_idx in enumerate([i for i, mask in enumerate(vertex_mask) if mask])}
+                
+                # 过滤三角形，只保留属于最大分量的三角形
+                filtered_triangles = []
+                for tri in triangles:
+                    if all(vertex_mask[v] for v in tri):
+                        new_tri = [vertex_map[v] for v in tri]
+                        filtered_triangles.append(new_tri)
+                
+                # 创建新的网格
+                new_vertices = vertices[vertex_mask]
+                new_mesh = o3d.geometry.TriangleMesh()
+                new_mesh.vertices = o3d.utility.Vector3dVector(new_vertices)
+                new_mesh.triangles = o3d.utility.Vector3iVector(filtered_triangles)
+                new_mesh.compute_vertex_normals()
+                
+                print(f"后处理完成，保留最大分量，顶点数: {len(new_mesh.vertices)}, 面数: {len(new_mesh.triangles)}")
+                return new_mesh
+        except Exception as e:
+            print(f"后处理时出错: {e}")
+        
+        mesh.compute_vertex_normals()
+        print(f"后处理完成，顶点数: {len(mesh.vertices)}, 面数: {len(mesh.triangles)}")
+        return mesh
+    
+    def _compute_connected_components(self, mesh):
+        """计算网格的连通分量（兼容不同版本的Open3D）
+        
+        参数:
+            mesh: 输入网格
+            
+        返回:
+            list: 每个顶点所属的连通分量索引
+        """
+        vertices = np.asarray(mesh.vertices)
+        triangles = np.asarray(mesh.triangles)
+        
+        # 构建邻接表
+        adjacency = {i: set() for i in range(len(vertices))}
+        for tri in triangles:
+            for i in range(3):
+                v1 = tri[i]
+                v2 = tri[(i+1)%3]
+                adjacency[v1].add(v2)
+                adjacency[v2].add(v1)
+        
+        # 使用BFS计算连通分量
+        visited = [False] * len(vertices)
+        components = [-1] * len(vertices)
+        component_id = 0
+        
+        for i in range(len(vertices)):
+            if not visited[i]:
+                # BFS
+                queue = [i]
+                visited[i] = True
+                components[i] = component_id
+                
+                while queue:
+                    current = queue.pop(0)
+                    for neighbor in adjacency[current]:
+                        if not visited[neighbor]:
+                            visited[neighbor] = True
+                            components[neighbor] = component_id
+                            queue.append(neighbor)
+                
+                component_id += 1
+        
+        return components
+
     def get_lod(self, index):
         """获取指定索引的LOD模型"""
         if 0 <= index < len(self.lod_levels):

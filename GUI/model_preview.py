@@ -8,6 +8,7 @@ import tkinter as tk
 from tkinter import ttk
 import numpy as np
 import open3d as o3d
+import threading
 
 class ModelPreview(tk.Frame):
     def __init__(self, parent):
@@ -56,6 +57,48 @@ class ModelPreview(tk.Frame):
         except Exception as e:
             raise e
     
+    def set_original_info(self, vertices_count, triangles_count):
+        """直接设置原始模型信息，不重新加载模型"""
+        self.original_info.set(f"原始模型: {vertices_count} 顶点, {triangles_count} 面")
+    
+    def set_simplified_info(self, vertices_count, triangles_count):
+        """直接设置简化模型信息"""
+        self.simplified_info.set(f"简化模型: {vertices_count} 顶点, {triangles_count} 面")
+    
+    def show_3d_model_async(self, mesh, window_name, model_type):
+        """异步显示3D模型，不阻塞UI"""
+        thread = threading.Thread(target=self._show_3d_model_thread, args=(mesh, window_name, model_type))
+        thread.daemon = True
+        thread.start()
+    
+    def _show_3d_model_thread(self, mesh, window_name, model_type):
+        """后台线程显示3D模型"""
+        try:
+            import time
+            time.sleep(0.5)  # 等待UI稳定
+            
+            visualizer = o3d.visualization.Visualizer()
+            visualizer.create_window(window_name=window_name, width=800, height=600, visible=True)
+            
+            visualizer.add_geometry(mesh)
+            visualizer.get_render_option().background_color = [0.8, 0.8, 0.8]
+            visualizer.get_render_option().mesh_show_wireframe = False
+            visualizer.get_render_option().mesh_show_back_face = True
+            visualizer.reset_view_point(True)
+            
+            while visualizer.poll_events():
+                visualizer.update_renderer()
+                time.sleep(0.01)
+                
+        except Exception as e:
+            print(f"Visualizer error: {e}")
+        finally:
+            try:
+                if visualizer:
+                    visualizer.destroy_window()
+            except:
+                pass
+    
     def show_simplified(self, simplified_mesh):
         """显示简化后的模型信息"""
         try:
@@ -64,8 +107,8 @@ class ModelPreview(tk.Frame):
             
             self.simplified_info.set(f"简化模型: {len(vertices)} 顶点, {len(triangles)} 面")
             
-            # 显示3D模型
-            self.show_3d_model(simplified_mesh, "简化模型", "simplified")
+            # 使用异步方式显示3D模型，不阻塞UI
+            self.show_3d_model_async(simplified_mesh, "简化模型", "simplified")
             
         except Exception as e:
             raise e
@@ -86,43 +129,34 @@ class ModelPreview(tk.Frame):
             except:
                 pass
         
-        # 异步运行可视化器
+        # 在后台线程中运行可视化器，避免阻塞UI
         def run_visualizer():
-            visualizer = None
             try:
-                # 在新线程中创建可视化器
+                import time
+                time.sleep(0.1)  # 等待UI更新完成
+                
                 visualizer = o3d.visualization.Visualizer()
-                visualizer.create_window(window_name=window_name, width=800, height=600)
+                visualizer.create_window(window_name=window_name, width=800, height=600, visible=True)
                 
-                # 添加模型
                 visualizer.add_geometry(mesh)
-                
-                # 设置视角
                 visualizer.get_render_option().background_color = [0.8, 0.8, 0.8]
                 visualizer.get_render_option().mesh_show_wireframe = False
                 visualizer.get_render_option().mesh_show_back_face = True
-                
-                # 自动调整视角
                 visualizer.reset_view_point(True)
                 
-                # 使用非阻塞模式运行可视化器
-                while True:
-                    # 检查窗口是否关闭
-                    if not visualizer.poll_events():
-                        break
-                    # 渲染
+                while visualizer.poll_events():
                     visualizer.update_renderer()
+                    time.sleep(0.01)
+                    
             except Exception as e:
-                print(f"Error in visualizer thread: {e}")
+                print(f"Visualizer error: {e}")
             finally:
-                # 确保窗口被销毁
-                if visualizer:
-                    try:
+                try:
+                    if visualizer:
                         visualizer.destroy_window()
-                    except:
-                        pass
+                except:
+                    pass
         
-        import threading
         thread = threading.Thread(target=run_visualizer)
         thread.daemon = True
         thread.start()
